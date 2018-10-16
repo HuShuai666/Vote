@@ -25,7 +25,7 @@ class VoteRecordView(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.Upda
 
     #
     # def vote_count(self,usa_state,canada_state):
-
+    # 获取第二天的凌晨0点的时间
     def get_end_time(self):
         tt = datetime.now().timetuple()
         unix_ts = time.mktime(tt)
@@ -51,64 +51,77 @@ class VoteRecordView(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.Upda
             canada_openid = SubscribeMessage.objects.filter(canada_openid=openid).values('canada_openid')
         # 根据student_id获取被投票人对象
         select_choice = vote_to.voterecord_set.get(student_id)
+        # 定时凌晨0点刷新
         while (datetime.datetime.now() + datetime.timedelta(seconds=1)).strftime(
                 '%Y-%m-%d %H:%M:%S') == self.get_end_time():
             usa_state = WxInterfaceUtil.state(usa_openid['usa_openid'])
             canada_state = WxInterfaceUtil.state(canada_openid['canada_openid'])
+            vote_count_day = SubscribeMessage.objects.filter(union_id=union_id['union_id'],
+                                                             create_time__lte=self.get_end_time()).count()
             # 判断公众号的关注状态，当点赞次数用完的时候，显示相关提示信息
             if usa_state == 1 and canada_state == 0:
-                vote_count = 2
-                if vote_count >= 1:
+                # 每一次投票都是重新调用vote这个函数，当在这一天没有投票，vote_count_day为0时，此时的投票次数不变为2.
+                # 如果vote_count_day为1时，这时，就要在当前状态下的投票次数-1.
+                vote_count = 2 - vote_count_day
+                # 如果投票次数大于0，并且一天总投票数小于6
+                if vote_count >= 1 and vote_count_day <= 5:
+                    select_choice.student.ticket += 1
+                    redis_client.zadd('students', select_choice.student.ticket, student_id)
+                    '''这里还可以求出学生票数的排名，并返回'''
+                    SubscribeMessage.objects.create(union_id=union_id['union_id'], student=student_id)
+                    return Response(student_id, select_choice.student.ticket, union_id['union_id'])
+                    # usa_state = WxInterfaceUtil.state(usa_openid['usa_openid'])
+                    # canada_state = WxInterfaceUtil.state(canada_openid['canada_openid'])
+                    # if usa_state == 1 and canada_state == 0:
+                    #     vote_count += -1
+                    # elif usa_state == 0 and canada_state == 1:
+                    #     vote_count += - 2 + 3
+                    # elif usa_state == 1 and canada_state == 1:
+                    #     vote_count += - 1 + 3
+                    # # elif usa_state == 0 and canada_state == 0:
+                    # #     vote_count += -2 - 3
+                    # else:
+                    #     raise  exceptions.ValidationError('请先关注再来投票')
+                else:
+                    raise exceptions.ValidationError('您的投票次数已经用完')
+                # else:
+                #     raise exceptions.ValidationError('您当前的投票次数已经用完')
+
+            elif usa_state == 0 and canada_state == 1:
+                vote_count = 3 - vote_count_day
+                if vote_count >= 1 and vote_count_day <= 5:
                     select_choice.student.ticket += 1
                     redis_client.zadd('students', select_choice.student.ticket, student_id)
                     SubscribeMessage.objects.create(union_id=union_id['union_id'], student=student_id)
-                    usa_state = WxInterfaceUtil.state(openid)
-                    canada_state = WxInterfaceUtil.state(openid)
-                    vote_count_day = SubscribeMessage.objects.filter(union_id=union_id['union_id'],
-                                                                     create_time__lte=self.get_end_time()).count()
-                    if vote_count_day <= 5:
-                        if usa_state == 1 and canada_state == 0:
-                            vote_count += -1
-                        elif usa_state == 0 and canada_state == 1:
-                            vote_count += - 2 + 3
-                        elif usa_state == 1 and canada_state == 1:
-                            vote_count += - 1 + 3
-                        elif usa_state == 0 and canada_state == 0:
-                            vote_count += -2 - 3
-                    else:
-                        raise exceptions.ValidationError('您今日的投票次数已经用完，请明天再来')
+                    return Response(student_id, select_choice.student.ticket, union_id['union_id'])
+                    # usa_state = WxInterfaceUtil.state(usa_openid['usa_openid'])
+                    # canada_state = WxInterfaceUtil.state(canada_openid['canada_openid'])
+                    # if usa_state==0 and canada_state==1:
+                    #     vote_count += -1
+                    # elif usa_state==1 and canada_state==0:
+                    #     vote_count +=-3+2
                 else:
-                    raise exceptions.ValidationError('您当前的投票次数已经用完')
-
-            elif canada_state == 1 and usa_state == 0:
-                vote_count = 3
-                if vote_count >= 1:
-                    select_choice.student.ticket += 1
-                    SubscribeMessage.objects.create(union_id=union_id['union_id'], student=student_id)
-                    vote_count += -1
-                else:
-                    raise exceptions.ValidationError('您的投票次数已经用完，关注北美留学生可继续投票')
+                    raise exceptions.ValidationError('您的投票次数已经用完')
 
             elif usa_state == 1 and canada_state == 1:
-                vote_count = 5
-                if vote_count >= 1:
+                vote_count = 5 - vote_count_day
+                if vote_count >= 1 and vote_count_day <= 5:
                     select_choice.student.ticket += 1
+                    redis_client.zadd('students', select_choice.student.ticket, student_id)
                     SubscribeMessage.objects.create(union_id=union_id['union_id'], student=student_id)
-                    vote_count += -1
+                    return Response(student_id, select_choice.student.ticket, union_id['union_id'])
+
                 else:
                     raise exceptions.ValidationError('您的今日投票次数已经用完，请明日再来')
 
-                '''
-                   投票过程中。每一次投票后，都要重新判断两个公众号的状态
-                   '''
-                '''
-                关注一次后，给两次投票机会，如果在关注后，投票一次，取消关注，则不能继续投票，  再出去关注，又得到投票机会，
-                此时就要判断关注的公众号有了几次投票记录。而且要每次判断两个公众号的关注状态。假如投票一次后，又出去关注了另外一个公众号，则vote_count
-                就要加上相应的次数。如果投票一次后，出去取关，则减去相应的次数。  并且控制每天的投票数最大为5.
-                '''
         else:
             vote_count = 0
             raise exceptions.ValidationError('关注公众号才能开始投票哦')
+
+    @list_route()
+    def rank(self):
+        students_rank = redis_client.zrange('students', 0, -1)
+        return Response(students_rank)
 
 
 class StudentView(mixins.CreateModelMixin, mixins.ListModelMixin, mixins.UpdateModelMixin, mixins.RetrieveModelMixin,

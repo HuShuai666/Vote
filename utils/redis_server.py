@@ -83,6 +83,9 @@ class RedisClient:
     def zadd(self, name, *args, **kwargs):
         self.redis_client.zadd(name, *args, **kwargs)
 
+    def zrange(self, name, start, stop):
+        self.redis_client.zrange(name, start, stop, withscores=True)
+
     def hset(self, name, key, value):
         """在name对应的集合中添加某些值（hash类型数据操作）"""
         return self.redis_client.hset(name, key, value)
